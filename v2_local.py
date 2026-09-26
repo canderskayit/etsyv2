@@ -112,6 +112,33 @@ def create_collection(app, payload):
 
 
 def action(app, route, payload):
+    if route == '/api/v2/variants/apply-defaults':
+        product_id = str(payload.get('product_id') or '')
+        with app.db() as conn:
+            product = conn.execute('SELECT status FROM products WHERE id=?', (product_id,)).fetchone()
+            if not product:
+                raise ValueError('Ürün bulunamadı.')
+            if product['status'] in {'queued', 'running'}:
+                raise ValueError('Varyasyon eklemeden önce üretimi durdurun.')
+            kinds = {row['kind'] for row in conn.execute('SELECT DISTINCT kind FROM variants WHERE product_id=?', (product_id,))}
+        settings = app.get_settings()
+        available = []
+        for kind in ('unframed', 'framed'):
+            key = f'default_{kind}_csv_path'
+            if kind in kinds:
+                settings[key] = ''
+            elif settings.get(key):
+                path = Path(settings[key])
+                if not path.is_file():
+                    raise ValueError(f'{kind} CSV bulunamadı. Gelişmiş ayarlardan yeniden yükleyin.')
+                app.validate_variant_csv_bytes(path.read_bytes())
+                available.append(kind)
+        if not available:
+            raise ValueError('Eksik türler için kayıtlı CSV yok. Gelişmiş ayarlarda framed/unframed dosyalarını seçip kaydedin.')
+        results = app.apply_default_variant_csvs(product_id, settings)
+        if any(not results.get(kind, {}).get('created') for kind in available):
+            raise ValueError('Bazı varyasyonlar eklenemedi. Ürünün Son işlemler bölümündeki hatayı kontrol edin.')
+        return {'created': sum(row['created'] for row in results.values()), **app.product_payload(product_id)}
     if route == '/api/v2/pick':
         return pick(payload.get('kind'))
     if route == '/api/v2/collections':

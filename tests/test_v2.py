@@ -139,4 +139,89 @@ class IsolatedStudio(unittest.TestCase):
             self.assertNotIn(directory,{'data','logs','validation','templates'})
         self.assertNotIn('original-hashes.json',module.FILES)
 
+    @staticmethod
+    def csv_upload(text, name='prices.csv'):
+        return {'filename': name, 'data_url': 'data:text/csv;base64,' + base64.b64encode(text.encode('utf-8-sig')).decode()}
+
+    def test_settings_upload_creates_both_physical_variant_types(self):
+        settings = server.save_settings({
+            'default_unframed_csv_file': self.csv_upload('Size,Product price,Shipping price\n30x40,12,3\n50x70,20,5\n'),
+            'default_framed_csv_file': self.csv_upload('Size,Frame,Product price,Shipping price\n30x40,Black,25,4\n30x40,White,26,4\n'),
+            'default_unframed_percent': 0,
+        })
+        # Both inputs commonly have the same exported filename: neither may overwrite the other.
+        self.assertNotEqual(settings['default_unframed_csv_path'],settings['default_framed_csv_path'])
+        product = server.create_product({'selection_name':'İlk koleksiyonum'})['products'][0]
+        variants=product['variants']
+        self.assertEqual([v['kind'] for v in variants].count('unframed'),2)
+        self.assertEqual([v['kind'] for v in variants].count('framed'),2)
+        self.assertEqual([v['kind'] for v in variants].count('digital'),1)
+        self.assertEqual({v['frame_label'] for v in variants if v['kind']=='framed'},{'Black','White'})
+        self.assertEqual(min(v['sale_price_usd'] for v in variants if v['kind']=='unframed'),15)
+
+    def test_legacy_csv_upload_field_is_accepted(self):
+        settings=server.save_settings({'default_framed_csv':self.csv_upload('Size;Frame;Cost\n30x40;Black;20\n')})
+        self.assertTrue(Path(settings['default_framed_csv_path']).is_file())
+        product=server.create_product({'selection_name':'İlk koleksiyonum'})['products'][0]
+        self.assertTrue(any(v['kind']=='framed' for v in product['variants']))
+
+    def test_invalid_csv_save_keeps_previous_settings_and_file(self):
+        before=server.save_settings({'default_unframed_csv_file':self.csv_upload('Size,Cost\n30x40,12\n')})
+        path=Path(before['default_unframed_csv_path']);content=path.read_bytes()
+        for invalid in ['Size,Cost\n','wrong,headers\na,b\n']:
+            with self.assertRaises(ValueError):
+                server.save_settings({'default_unframed_csv_file':self.csv_upload(invalid)})
+            self.assertEqual(path.read_bytes(),content)
+            self.assertEqual(server.get_settings()['default_unframed_csv_path'],str(path))
+
+    def test_repair_adds_missing_variants_without_replacing_existing(self):
+        product=server.create_product({'selection_name':'İlk koleksiyonum'})['products'][0]
+        server.save_settings({'default_unframed_csv_file':self.csv_upload('Size,Cost\n30x40,12\n')})
+        repaired=v2_local.action(server,'/api/v2/variants/apply-defaults',{'product_id':product['id']})
+        self.assertEqual(repaired['created'],1)
+        existing_ids={v['id'] for v in repaired['products'][0]['variants']}
+        server.save_settings({'default_framed_csv_file':self.csv_upload('Size,Frame,Cost\n30x40,Black,25\n')})
+        repaired=v2_local.action(server,'/api/v2/variants/apply-defaults',{'product_id':product['id']})
+        self.assertEqual(repaired['created'],1)
+        self.assertTrue(existing_ids.issubset({v['id'] for v in repaired['products'][0]['variants']}))
+        with self.assertRaisesRegex(ValueError,'kayıtlı CSV yok'):
+            v2_local.action(server,'/api/v2/variants/apply-defaults',{'product_id':product['id']})
+        self.assertEqual(len(server.product_payload(product['id'])['products'][0]['variants']),3)
+
+    def test_repair_rejects_running_product(self):
+        product=server.create_product({'selection_name':'İlk koleksiyonum'})['products'][0]
+        server.update_product(product['id'],status='running')
+        with self.assertRaisesRegex(ValueError,'durdurun'):
+            v2_local.action(server,'/api/v2/variants/apply-defaults',{'product_id':product['id']})
+
+    def test_ready_to_hang_filter_and_failed_replacement_preserve_variants(self):
+        product=server.create_product({'selection_name':'İlk koleksiyonum'})['products'][0]
+        path=self.root/'frames.csv'
+        path.write_text('Size,Frame,Assembly,Product price\n30x40,Black,Ready-to-hang,25 USD\n30x40,Black,Not assembled,20 USD\n',encoding='utf-8')
+        result=server.parse_variants_csv(product['id'],path,40,'framed',True,'margin',1)
+        self.assertEqual(result['created'],1)
+        before=server.product_payload(product['id'])['products'][0]['variants']
+        path.write_text('Size,Frame,Assembly,Product price\n30x40,Black,Not assembled,20 USD\n',encoding='utf-8')
+        with self.assertRaisesRegex(ValueError,'uygun varyasyon'):
+            server.parse_variants_csv(product['id'],path,40,'framed',True,'margin',1)
+        self.assertEqual(server.product_payload(product['id'])['products'][0]['variants'],before)
+
+    def test_http_save_and_reload_csv_settings(self):
+        http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
+        self.stack.enter_context(patch.object(server,'APP_PORT',http.server_port))
+        threading.Thread(target=http.serve_forever,daemon=True).start()
+        self.addCleanup(http.server_close);self.addCleanup(http.shutdown)
+        url=f'http://127.0.0.1:{http.server_port}/api/settings'
+        payload={'default_unframed_csv_file':self.csv_upload('Size,Cost\n30x40,12\n'),
+                 'default_framed_csv_file':self.csv_upload('Size,Frame,Cost\n30x40,Black,25\n')}
+        request=urllib.request.Request(url,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
+        with urllib.request.urlopen(request) as response:
+            saved=json.load(response)
+        with urllib.request.urlopen(url) as response:
+            reloaded=json.load(response)
+        for kind in ['unframed','framed']:
+            key=f'default_{kind}_csv_path'
+            self.assertEqual(saved[key],reloaded[key])
+            self.assertTrue(Path(reloaded[key]).is_file())
+
 if __name__=='__main__':unittest.main()

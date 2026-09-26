@@ -955,20 +955,26 @@ def parse_variants_csv(
 
     upload_kind = upload_kind if upload_kind in {"framed", "unframed"} else "auto"
     settings = get_settings()
+    eligible_rows = []
+    for row in rows:
+        frame = first_present(row, ["Frame", "Frame color", "Color", "Colour"])
+        kind = upload_kind if upload_kind != "auto" else ("framed" if frame else "unframed")
+        assembly = first_present(row, ["Assembly"]).strip().lower()
+        if kind == "framed" and assembly and assembly != "ready-to-hang":
+            continue
+        eligible_rows.append(row)
+    if len(eligible_rows) != len(rows):
+        warnings.append(f"Ready-to-hang olmayan {len(rows) - len(eligible_rows)} satır atlandı.")
+    rows = eligible_rows
+    if not rows:
+        raise ValueError("CSV dosyasında uygun varyasyon satırı yok. Framed için Ready-to-hang satırları gerekli.")
+
+    ensure_digital_variant(product_id)
     with db() as conn:
         if upload_kind == "auto":
             conn.execute("DELETE FROM variants WHERE product_id=? AND kind!='digital'", (product_id,))
         else:
             conn.execute("DELETE FROM variants WHERE product_id=? AND kind=?", (product_id, upload_kind))
-
-    ensure_digital_variant(product_id)
-
-    if not rows:
-        warnings.append("CSV dosyasında başlık var ama varyasyon satırı yok.")
-        add_event(product_id, "warning", warnings[-1], "csv_variants")
-        return {"created": 0, "warnings": warnings}
-
-    with db() as conn:
         for idx, row in enumerate(rows, start=1):
             size = first_present(row, ["Size", "Size (unframed)", "Variant", "Variant name"])
             frame = first_present(row, ["Frame", "Frame color", "Color", "Colour"])
@@ -1090,12 +1096,14 @@ def apply_default_variant_csvs(product_id: str, settings: dict | None = None) ->
     settings = settings or get_settings()
     results: dict[str, dict] = {}
     specs = [
-        ("unframed", settings.get("default_unframed_csv_path"), float(settings.get("default_unframed_percent") or 80)),
-        ("framed", settings.get("default_framed_csv_path"), float(settings.get("default_framed_percent") or 80)),
+        ("unframed", settings.get("default_unframed_csv_path"), float(settings.get("default_unframed_percent", 40))),
+        ("framed", settings.get("default_framed_csv_path"), float(settings.get("default_framed_percent", 40))),
     ]
     for kind, path_value, percent in specs:
         path = Path(str(path_value or ""))
         if not path_value or not path.exists() or not path.is_file():
+            if path_value:
+                add_event(product_id, "warning", f"{kind} CSV dosyası bulunamadı. Gelişmiş ayarlardan yeniden yükleyin.", "csv_variants")
             continue
         try:
             results[kind] = parse_variants_csv(
@@ -1111,7 +1119,7 @@ def apply_default_variant_csvs(product_id: str, settings: dict | None = None) ->
             add_event(
                 product_id,
                 "warning",
-                f"Varsayilan {kind} CSV uygulanamadi.",
+                f"{kind} CSV uygulanamadı: {readable_exception(exc)}",
                 "csv_variants",
                 meta={"error": readable_exception(exc), "path": str(path)},
             )
@@ -1762,15 +1770,36 @@ def save_setting_updates(updates: dict) -> None:
     write_json_file(SETTINGS_PATH, settings)
 
 
+def validate_variant_csv_bytes(raw: bytes) -> list[dict]:
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("CSV dosyasını UTF-8 CSV olarak kaydedip yeniden seçin.") from exc
+    rows, _ = read_csv_dict_rows(text)
+    rows = [row for row in rows if any(str(value or "").strip() for value in row.values())]
+    if not rows:
+        raise ValueError("CSV boş veya yalnızca başlık içeriyor; en az bir varyasyon satırı gerekli.")
+    headers = {str(key).strip().lower() for key in rows[0]}
+    sizes = {"size", "size (unframed)", "variant", "variant name", "name", "title"}
+    costs = {"product price", "product cost", "cost", "base price", "total price", "total cost", "total"}
+    if not headers.intersection(sizes) or not headers.intersection(costs):
+        raise ValueError("CSV başlıkları tanınmadı. Size (veya Variant/Name) ile Product price (veya Cost/Total) sütunları gerekli.")
+    return rows
+
+
 def save_default_csv_setting(payload: dict, key: str, label: str) -> dict:
-    csv_file = payload.get(f"{key}_file") or {}
-    if not isinstance(csv_file, dict) or not csv_file.get("data_url"):
+    # Accept the old panel's unsuffixed field as well as the canonical upload field.
+    csv_file = payload.get(f"{key}_file", payload.get(key))
+    if csv_file is None:
         return {}
+    if not isinstance(csv_file, dict) or not csv_file.get("data_url"):
+        raise ValueError(f"{label} CSV yüklemesi eksik; dosyayı yeniden seçin.")
     _mime, raw = decode_data_url(csv_file["data_url"])
+    validate_variant_csv_bytes(raw)
     safe_name = slugify_filename(csv_file.get("filename") or f"{label}.csv", f"{label}.csv")
-    target_dir = DATA / "default_csv"
+    target_dir = DATA / "default_csv" / key
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / safe_name
+    target = target_dir / f"{Path(safe_name).stem}-{hashlib.sha256(raw).hexdigest()[:16]}.csv"
     target.write_bytes(raw)
     return {
         f"{key}_path": str(target),

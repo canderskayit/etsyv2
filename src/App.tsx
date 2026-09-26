@@ -606,12 +606,14 @@ export default function App() {
       };
       const unframed = settingsUnframedRef.current?.files?.[0];
       const framed = settingsFramedRef.current?.files?.[0];
-      if (unframed) payload.default_unframed_csv = await filePayload(unframed);
-      if (framed) payload.default_framed_csv = await filePayload(framed);
+      if (unframed) payload.default_unframed_csv_file = await filePayload(unframed);
+      if (framed) payload.default_framed_csv_file = await filePayload(framed);
       const saved = await api<Settings>("/api/settings", { method: "POST", body: JSON.stringify(payload) });
       setSettings({ ...emptySettings, ...saved });
       await refreshStudio();
-      setNotice("Ayarlar kaydedildi.");
+      if (settingsUnframedRef.current) settingsUnframedRef.current.value = "";
+      if (settingsFramedRef.current) settingsFramedRef.current.value = "";
+      setNotice(unframed || framed ? "CSV dosyaları kaydedildi. Yeni ürünlerde otomatik uygulanır. Önceden oluşturulan ürünlerde Varyasyon özeti bölümünden eksik CSV varyasyonlarını ekleyebilirsin." : "Ayarlar kaydedildi.");
     } catch (value) {
       showError(value);
     } finally {
@@ -883,6 +885,7 @@ export default function App() {
 
         {view === "production" ? (
           <ProductionView
+            onReload={() => loadProducts(selectedProduct?.id)}
             products={productionProducts}
             selected={selectedProduct}
             loading={busy === "product-detail"}
@@ -1014,6 +1017,7 @@ function SummaryLine({ label, value }: { label: string; value: string }) {
 }
 
 type ProductionProps = {
+  onReload: () => Promise<void>;
   products: Product[];
   selected: Product | null;
   loading: boolean;
@@ -1052,6 +1056,19 @@ function ProductionView(props: ProductionProps) {
 }
 
 function ProductDetail(props: ProductionProps & { product: Product }) {
+  const [addingVariants, setAddingVariants] = useState(false);
+  const [variantError, setVariantError] = useState("");
+  useEffect(() => { setVariantError(""); }, [props.product.id]);
+  async function addMissingVariants() {
+    setAddingVariants(true);
+    setVariantError("");
+    try {
+      await api("/api/v2/variants/apply-defaults", { method: "POST", body: JSON.stringify({ product_id: props.product.id }) });
+      await props.onReload();
+    } catch (value) {
+      setVariantError(value instanceof Error ? value.message : String(value));
+    } finally { setAddingVariants(false); }
+  }
   const mockups = props.product.assets?.filter((asset) => asset.kind === "mockup" || asset.kind === "static_listing_image") || [];
   const videos = props.product.assets?.filter((asset) => asset.kind === "video") || [];
   const active = ["running", "queued"].includes(props.product.status);
@@ -1079,7 +1096,7 @@ function ProductDetail(props: ProductionProps & { product: Product }) {
     <LiveProcessTracker product={props.product} />
     <div className="info-grid"><Metric label="Varyasyon" value={String(props.product.variants?.length || 0)} /><Metric label="Mockup" value={String(mockups.length)} /><Metric label="Video" value={String(videos.length)} /><Metric label="Etsy" value={props.product.listing_id ? `Draft ${props.product.listing_id}` : "Bekliyor"} /></div>
     <section className="detail-section"><div className="section-heading"><div><h3>Mockup ve video</h3><span>Photoshop çıktıları</span></div></div>{mockups.length ? <div className="media-grid compact">{mockups.map((asset) => <figure key={asset.id}><img src={`${asset.url}?preview=1`} alt={asset.label} loading="lazy" decoding="async" /><figcaption>{asset.label}</figcaption></figure>)}</div> : <EmptyState title="Mockup henüz üretilmedi" text="Ürünü sıraya aldığında çıktılar burada görünür." />}{videos.map((asset) => <video key={asset.id} className="wide-video" src={asset.url} controls muted preload="none" />)}</section>
-    <section className="detail-section"><div className="section-heading"><div><h3>Varyasyon özeti</h3><span>{props.product.variants?.length || 0} satır</span></div></div><VariantSummary variants={props.product.variants || []} /></section>
+    <section className="detail-section"><div className="section-heading"><div><h3>Varyasyon özeti</h3><span>{props.product.variants?.length || 0} satır</span></div>{["framed", "unframed"].some(kind => !props.product.variants?.some(v => v.kind === kind)) ? <button className="button" disabled={active || addingVariants} onClick={() => void addMissingVariants()}><RefreshCw />{addingVariants ? "Ekleniyor…" : "Eksik CSV varyasyonlarını ekle"}</button> : null}</div>{variantError ? <p className="inline-message error" role="alert">{variantError}</p> : null}<VariantSummary variants={props.product.variants || []} /></section>
     <section className="detail-section"><div className="section-heading"><div><h3>Son işlemler</h3><span>Yeni kayıtlar üstte görünür</span></div></div><div className="event-list wide">{props.product.events?.slice(0, 18).map((event) => <div className={`event-row ${event.kind}`} key={event.id}><strong>{event.message}</strong><span>{event.progress !== undefined && event.progress !== null ? `${event.progress}% · ` : ""}{formatTime(event.created_at)}</span></div>)}</div></section>
   </div>;
 }
@@ -1132,7 +1149,7 @@ function VariantSummary({ variants }: { variants: Variant[] }) {
     });
     return Array.from(map.values());
   }, [variants]);
-  return groups.length ? <div className="variant-list">{groups.slice(0, 40).map((rows) => <div className="variant-row" key={`${rows[0].kind}-${rows[0].size_label}-${rows[0].orientation_label}`}><span className={`kind-dot ${rows[0].kind}`} /><strong>{rows[0].size_label}</strong><span>{rows[0].kind === "framed" ? rows.map((item) => item.frame_label).filter(Boolean).join(", ") : rows[0].kind}</span><b>{money(Math.min(...rows.map((item) => item.sale_price_usd)))}</b></div>)}</div> : <EmptyState title="Varyasyon yok" text="Varsayılan CSV ayarlarını kontrol et." />;
+  return groups.length ? <div className="variant-list">{groups.map((rows) => <div className="variant-row" key={`${rows[0].kind}-${rows[0].size_label}-${rows[0].orientation_label}`}><span className={`kind-dot ${rows[0].kind}`} /><strong>{rows[0].size_label}</strong><span>{rows[0].kind === "framed" ? rows.map((item) => item.frame_label).filter(Boolean).join(", ") : rows[0].kind}</span><b>{money(Math.min(...rows.map((item) => item.sale_price_usd)))}</b></div>)}</div> : <EmptyState title="Varyasyon yok" text="Varsayılan CSV ayarlarını kontrol et." />;
 }
 
 type ExistingProps = {

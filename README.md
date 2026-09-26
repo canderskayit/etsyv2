@@ -63,7 +63,7 @@ Dağıtım: `runtime\python.exe -B tools\package_release.py`
 
 ## Doğrulama
 
-18 Python testi, üç yeni React ekranının kod seviyesinde render kontrolü, TypeScript kontrolü ve üretim derlemesi doğrulandı. Taşınabilir ortam içinde PIL, PDF, NumPy, OpenCV ve FFmpeg modülleri yüklendi. GitHub kaynaklarından ilk kurulum temiz bir klasörde denendi. Mevcut kaynakların SHA-256 değerleri korunmuştur.
+25 Python testi, üç yeni React ekranının kod seviyesinde render kontrolü, TypeScript kontrolü ve üretim derlemesi doğrulandı. Taşınabilir ortam içinde PIL, PDF, NumPy, OpenCV ve FFmpeg modülleri yüklendi. GitHub kaynaklarından ilk kurulum temiz bir klasörde denendi. Mevcut kaynakların SHA-256 değerleri korunmuştur.
 
 Canlı Etsy yetkilendirmesi, mağazaya yazma, gerçek Photoshop/PSD/video üretimi ve ikinci fiziksel bilgisayar kurulumu bu teslimde çalıştırılmadı. Tarayıcı inceleme izni reddedildiği için görsel tarayıcı testi yapılmadı.
 
@@ -75,3 +75,9 @@ Canlı Etsy yetkilendirmesi, mağazaya yazma, gerçek Photoshop/PSD/video üreti
 - [Python Windows embedded dağıtımı](https://www.python.org/downloads/release/python-31210/)
 
 Python lisansı `runtime/LICENSE.txt`; paket lisansları `runtime/Lib/site-packages/*.dist-info` klasörlerindedir. FFmpeg lisans bilgileri `imageio_ffmpeg` paketindedir. Photoshop ve Etsy pakete dahil değildir; Etsy ile resmî ortaklık iddiası yoktur.
+
+## CSV kaydetme ve mevcut ürünler
+
+Ayarlar bölümündeki çerçevesiz ve çerçeveli CSV dosyalarını seçip Kaydet düğmesine basın. Kaydedilen dosya adları sayfa yenilendiğinde korunur. Boş veya uyumsuz CSV hata verir ve önceki kayıt korunur. Yeni ürünler bu dosyalardan otomatik varyasyon oluşturur. Daha önce açılan ürünlerde Varyasyon özeti altındaki Eksik CSV varyasyonlarını ekle düğmesini kullanın; mevcut varyasyonlar korunur.
+
+Framed CSV içinde Assembly sütunu varsa yalnızca Ready-to-hang satırları alınır. USD tutarlarına kur dönüşümü uygulanmaz. Fiyatlandırma, paneldeki maliyet/kargo ve kâr oranı ayarlarına göre devam eder.
