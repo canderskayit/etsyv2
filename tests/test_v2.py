@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 import tempfile
 import threading
@@ -72,6 +73,21 @@ class IsolatedStudio(unittest.TestCase):
         self.assertEqual(len(info['ready_videos']),1)
         with self.assertRaises(ValueError):
             v2_local.create_collection(server,{'name':result['name'],'mockups':[str(source)]})
+
+    def test_picker_selection_and_cancel(self):
+        paths=['C:\\Kullanıcı\\Çerçeve.psd','C:\\Mockups\\Oda.psd']
+        for expected in [paths, paths[:1], []]:
+            with patch.object(v2_local.subprocess,'run',return_value=subprocess.CompletedProcess([],0,json.dumps(expected),'')):
+                self.assertEqual(v2_local.pick('mockups'),{'paths':expected})
+
+    def test_picker_failures_offer_manual_paths(self):
+        for response in [subprocess.CompletedProcess([],1,'','error'),subprocess.CompletedProcess([],0,'',''),subprocess.CompletedProcess([],0,'"C:\\\\test.psd"','')]:
+            with patch.object(v2_local.subprocess,'run',return_value=response):
+                with self.assertRaisesRegex(RuntimeError,'Dosya yollarıyla ekle'):
+                    v2_local.pick('mockups')
+        with patch.object(v2_local.subprocess,'run',side_effect=subprocess.TimeoutExpired('powershell',90)):
+            with self.assertRaisesRegex(RuntimeError,'zaman aşımı'):
+                v2_local.pick('mockups')
 
     def test_collection_rejects_traversal_and_invalid_psd(self):
         for name in ['../escape','CON','NUL.txt','bad/name','test.']:

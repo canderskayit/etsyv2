@@ -63,7 +63,7 @@ Dağıtım: `runtime\python.exe -B tools\package_release.py`
 
 ## Doğrulama
 
-25 Python testi, üç yeni React ekranının kod seviyesinde render kontrolü, TypeScript kontrolü ve üretim derlemesi doğrulandı. Taşınabilir ortam içinde PIL, PDF, NumPy, OpenCV ve FFmpeg modülleri yüklendi. GitHub kaynaklarından ilk kurulum temiz bir klasörde denendi. Mevcut kaynakların SHA-256 değerleri korunmuştur.
+27 Python testi, üç yeni React ekranının kod seviyesinde render kontrolü, TypeScript kontrolü ve üretim derlemesi doğrulandı. Taşınabilir ortam içinde PIL, PDF, NumPy, OpenCV ve FFmpeg modülleri yüklendi. GitHub kaynaklarından ilk kurulum temiz bir klasörde denendi. Mevcut kaynakların SHA-256 değerleri korunmuştur.
 
 Canlı Etsy yetkilendirmesi, mağazaya yazma, gerçek Photoshop/PSD/video üretimi ve ikinci fiziksel bilgisayar kurulumu bu teslimde çalıştırılmadı. Tarayıcı inceleme izni reddedildiği için görsel tarayıcı testi yapılmadı.
 
@@ -81,3 +81,7 @@ Python lisansı `runtime/LICENSE.txt`; paket lisansları `runtime/Lib/site-packa
 Ayarlar bölümündeki çerçevesiz ve çerçeveli CSV dosyalarını seçip Kaydet düğmesine basın. Kaydedilen dosya adları sayfa yenilendiğinde korunur. Boş veya uyumsuz CSV hata verir ve önceki kayıt korunur. Yeni ürünler bu dosyalardan otomatik varyasyon oluşturur. Daha önce açılan ürünlerde Varyasyon özeti altındaki Eksik CSV varyasyonlarını ekle düğmesini kullanın; mevcut varyasyonlar korunur.
 
 Framed CSV içinde Assembly sütunu varsa yalnızca Ready-to-hang satırları alınır. USD tutarlarına kur dönüşümü uygulanmaz. Fiyatlandırma, paneldeki maliyet/kargo ve kâr oranı ayarlarına göre devam eder.
+
+## Windows dosya secimi
+
+PSD secme penceresinin one gelmesi icin Windows pencere sahibi acilip etkinlestirilir. Pencere acilmazsa Kutuphane > Dosya yollariyla ekle alanini kullanin: Windows Gezgininde PSD dosyalarini secip Yol olarak kopyala ile her satira bir tam yol yapistirin. Dosya yollarini kullan, ardindan Koleksiyonu kaydet dugmesine basin. Secici iptali, Unicode yollar, hatali sonuc ve zaman asimi otomatik test edilir; arkadasinizin Windows oturumunda pencerenin gorunurlugu ayrica kontrol edilmelidir.

@@ -1,5 +1,6 @@
 """Local-only onboarding and template library. No Etsy network calls here."""
 from pathlib import Path
+import base64
 import importlib
 import json
 import os
@@ -48,19 +49,41 @@ def pick(kind):
     if kind not in options:
         raise ValueError('Bilinmeyen dosya seçimi.')
     file_filter, multiple = options[kind]
-    script = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; '
+    script = '$ErrorActionPreference = "Stop"; [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); '
+    script += 'try { Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Application]::EnableVisualStyles(); '
     if kind == 'folder':
         script += '$d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = "Koleksiyonların bulunduğu klasör"; '
         result = '@($d.SelectedPath)'
     else:
         script += f'$d = New-Object System.Windows.Forms.OpenFileDialog; $d.Filter = "{file_filter}"; $d.Multiselect = ${str(multiple).lower()}; '
         result = '@($d.FileNames)'
-    script += '$owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; '
-    script += f'try {{ if ($d.ShowDialog($owner) -eq "OK") {{ ConvertTo-Json -InputObject {result} -Compress }} else {{ "[]" }} }} finally {{ $d.Dispose(); $owner.Dispose() }}'
-    completed = subprocess.run(['powershell.exe', '-NoProfile', '-STA', '-Command', script], capture_output=True, encoding='utf-8-sig', timeout=300, creationflags=0x08000000)
+    script += '$owner = New-Object System.Windows.Forms.Form; $owner.Text = "Etsy V2 - Dosya secimi"; '
+    script += '$owner.TopMost = $true; $owner.ShowInTaskbar = $true; $owner.StartPosition = "CenterScreen"; '
+    script += '$owner.Width = 1; $owner.Height = 1; $owner.Opacity = 0; '
+    # TopMost must have a live owner window before opening the modal dialog.
+    script += '$owner.Show(); $owner.Activate(); '
+    script += f'try {{ if ($d.ShowDialog($owner) -eq "OK") {{ ConvertTo-Json -InputObject {result} -Compress }} else {{ "[]" }} }} finally {{ $d.Dispose(); $owner.Dispose() }} '
+    script += '} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }'
+    encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+    hint = 'Kütüphanedeki "Dosya yollarıyla ekle" alanını da kullanabilirsiniz.'
+    try:
+        completed = subprocess.run(
+            ['powershell.exe', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+            capture_output=True, encoding='utf-8-sig', errors='replace', timeout=90, creationflags=0x08000000,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f'Dosya seçimi zaman aşımına uğradı. {hint}') from exc
+    except OSError as exc:
+        raise RuntimeError(f'Windows dosya seçici başlatılamadı. {hint}') from exc
     if completed.returncode:
-        raise RuntimeError('Dosya seçici açılamadı. Pencereyi kapatıp yeniden deneyin.')
-    return {'paths': json.loads(completed.stdout.strip() or '[]')}
+        raise RuntimeError(f'Windows dosya seçici açılamadı. {hint}')
+    try:
+        paths = json.loads(completed.stdout.strip())
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError(f'Windows dosya seçimi sonucu okunamadı. {hint}') from exc
+    if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+        raise RuntimeError(f'Windows geçersiz dosya seçimi döndürdü. {hint}')
+    return {'paths': paths}
 
 
 def create_collection(app, payload):
