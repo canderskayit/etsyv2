@@ -1,0 +1,16 @@
+data/app.sqlite3
+data/secrets.json
+logs/*.log
+__pycache__/
+*.pyc
+node_modules/
+runtime/
+python-runtime.zip
+validation/
+data/
+original-hashes.json
+compat-wheels/
+*.zip
+tools/adapt_v2.py
+tools/adapt_ui.py
+tools/runtime_check.py
