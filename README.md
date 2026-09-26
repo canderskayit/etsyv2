@@ -63,7 +63,7 @@ Dağıtım: `runtime\python.exe -B tools\package_release.py`
 
 ## Doğrulama
 
-27 Python testi, üç yeni React ekranının kod seviyesinde render kontrolü, TypeScript kontrolü ve üretim derlemesi doğrulandı. Taşınabilir ortam içinde PIL, PDF, NumPy, OpenCV ve FFmpeg modülleri yüklendi. GitHub kaynaklarından ilk kurulum temiz bir klasörde denendi. Mevcut kaynakların SHA-256 değerleri korunmuştur.
+34 Python testi, üç yeni React ekranının kod seviyesinde render kontrolü, TypeScript kontrolü ve üretim derlemesi doğrulandı. Taşınabilir ortam içinde PIL, PDF, NumPy, OpenCV ve FFmpeg modülleri yüklendi. GitHub kaynaklarından ilk kurulum temiz bir klasörde denendi. Mevcut kaynakların SHA-256 değerleri korunmuştur.
 
 Canlı Etsy yetkilendirmesi, mağazaya yazma, gerçek Photoshop/PSD/video üretimi ve ikinci fiziksel bilgisayar kurulumu bu teslimde çalıştırılmadı. Tarayıcı inceleme izni reddedildiği için görsel tarayıcı testi yapılmadı.
 
@@ -82,6 +82,12 @@ Ayarlar bölümündeki çerçevesiz ve çerçeveli CSV dosyalarını seçip Kayd
 
 Framed CSV içinde Assembly sütunu varsa yalnızca Ready-to-hang satırları alınır. USD tutarlarına kur dönüşümü uygulanmaz. Fiyatlandırma, paneldeki maliyet/kargo ve kâr oranı ayarlarına göre devam eder.
 
-## Windows dosya secimi
+## Mockup ve video seçimi
 
-PSD secme penceresinin one gelmesi icin Windows pencere sahibi acilip etkinlestirilir. Pencere acilmazsa Kutuphane > Dosya yollariyla ekle alanini kullanin: Windows Gezgininde PSD dosyalarini secip Yol olarak kopyala ile her satira bir tam yol yapistirin. Dosya yollarini kullan, ardindan Koleksiyonu kaydet dugmesine basin. Secici iptali, Unicode yollar, hatali sonuc ve zaman asimi otomatik test edilir; arkadasinizin Windows oturumunda pencerenin gorunurlugu ayrica kontrol edilmelidir.
+Kütüphanede Mockup PSD dosyalarını seç veya Video veya video şablonu seç düğmesine basın. Standart dosya penceresinde klasörlerde gezip dosyaları seçin. Mockup için Ctrl ile 1–19 PSD, video için bir PSD/MP4/MOV seçilebilir. İptal mevcut seçimi korur; aynı dosya yeniden seçilebilir. Yol yazılmaz. Koleksiyonu kaydet ile seçilen dosyalar yalnızca bu bilgisayardaki panel sunucusuna parça parça aktarılır; dosya başına sınır 4 GB.
+
+## Başlatma ve durdurma
+
+BASLAT.cmd çalışma klasörü farklı olsa da paket içindeki run.ps1 dosyasını kullanır. Art arda başlatma tek sunucuyu paylaşır. Sunucuya proxy kullanmadan erişilir; açılış için 90 saniye beklenir. Sağlam Python kurulumu tekrar indirilmez; eksik bileşen varsa kurulum denenir. Port başka uygulamaya aitse o uygulama kapatılmaz, açıklayıcı hata gösterilir. Hatalar yerel veri klasöründeki logs klasörüne yazılır. DURDUR.cmd sunucunun kapanmasını bekler.
+
+Windows üzerinde gerçek sunucuyla soğuk açılış, tekrar açılış, eşzamanlı iki başlatma, eksik/bozuk süreç kaydı, farklı çalışma klasöründen BASLAT.cmd ve dolu port testleri yapılır. Testler ayrı veri klasörü ve port kullanır; tarayıcı açmaz veya Etsy’ye bağlanmaz. Dosya seçiminin Windows penceresi ve gerçek Photoshop üretimi ikinci bilgisayarda ayrıca denenmelidir.

@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 
 
@@ -65,7 +66,7 @@ def pick(kind):
     script += f'try {{ if ($d.ShowDialog($owner) -eq "OK") {{ ConvertTo-Json -InputObject {result} -Compress }} else {{ "[]" }} }} finally {{ $d.Dispose(); $owner.Dispose() }} '
     script += '} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }'
     encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
-    hint = 'Kütüphanedeki "Dosya yollarıyla ekle" alanını da kullanabilirsiniz.'
+    hint = 'Pencereyi kapatıp tekrar deneyin.'
     try:
         completed = subprocess.run(
             ['powershell.exe', '-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
@@ -84,6 +85,43 @@ def pick(kind):
     if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
         raise RuntimeError(f'Windows geçersiz dosya seçimi döndürdü. {hint}')
     return {'paths': paths}
+
+
+def receive_library_file(app, stream, filename, kind, length):
+    """Stream a browser-selected file to local staging without base64 or RAM copies."""
+    allowed = {'.psd'} if kind == 'mockup' else {'.psd', '.mp4', '.mov'} if kind == 'video' else set()
+    suffix = Path(filename).suffix.lower()
+    if suffix not in allowed:
+        raise ValueError('Mockup için PSD; video için PSD, MP4 veya MOV seçin.')
+    if not 0 < length <= 4 * 1024**3:
+        raise ValueError('Dosya boş veya 4 GB sınırını aşıyor.')
+    staging = app.DATA / 'library_uploads'
+    staging.mkdir(parents=True, exist_ok=True)
+    # Discard only abandoned staging files, never source files or saved collections.
+    for old in staging.glob('*'):
+        if old.is_file() and not old.is_symlink() and old.stat().st_mtime < time.time() - 86400:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+    target = staging / f'{uuid.uuid4().hex}-{app.slugify_filename(Path(filename).name, "template" + suffix)}'
+    try:
+        with target.open('xb') as destination:
+            remaining = length
+            while remaining:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ValueError('Dosya aktarımı yarıda kaldı. Yeniden kaydedin.')
+                destination.write(chunk)
+                remaining -= len(chunk)
+        if suffix == '.psd':
+            with target.open('rb') as source:
+                if source.read(4) != b'8BPS':
+                    raise ValueError('Seçilen dosya geçerli bir Photoshop PSD dosyası değil.')
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return {'path': str(target), 'filename': filename, 'size': length}
 
 
 def create_collection(app, payload):
@@ -131,6 +169,13 @@ def create_collection(app, payload):
                 shutil.rmtree(pending)
     finally:
         shutil.rmtree(staging)
+    upload_dir = (app.DATA / 'library_uploads').resolve()
+    for source in sources + ([video] if video else []):
+        if source.parent == upload_dir:
+            try:
+                source.unlink(missing_ok=True)
+            except OSError:
+                pass
     return {'ok': True, 'name': name, 'mockup_count': len(sources), 'video_count': int(video is not None)}
 
 

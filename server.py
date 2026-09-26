@@ -9433,7 +9433,9 @@ class Handler(BaseHTTPRequestHandler):
         if host not in allowed or (origin and origin not in {f"http://{h}" for h in allowed}):
             self.send_json({"error": "Yalnızca yerel panelden erişilebilir."}, 403)
             return False
-        if self.command in {"POST", "PATCH", "DELETE"} and not self.headers.get("Content-Type", "").startswith("application/json"):
+        is_library_upload = self.command == "POST" and urllib.parse.urlparse(self.path).path == "/api/v2/library-files"
+        required_type = "application/octet-stream" if is_library_upload else "application/json"
+        if self.command in {"POST", "PATCH", "DELETE"} and not self.headers.get("Content-Type", "").startswith(required_type):
             self.send_json({"error": "JSON içerik türü gerekli."}, 415)
             return False
         return True
@@ -9502,7 +9504,7 @@ class Handler(BaseHTTPRequestHandler):
             path = parsed.path
             query = urllib.parse.parse_qs(parsed.query)
             if path == "/api/health":
-                self.send_json({"ok": True, "app": "etsy-ekosistem-v2", "version": "2.0.0", "root": str(ROOT), "time": now_iso()})
+                self.send_json({"ok": True, "app": "etsy-ekosistem-v2", "version": "2.0.0", "root": str(ROOT), "data_dir": str(DATA), "pid": os.getpid(), "time": now_iso()})
             elif path == "/api/v2/status":
                 import v2_local
                 self.send_json(v2_local.status(sys.modules[__name__]))
@@ -9607,6 +9609,23 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             path = urllib.parse.urlparse(self.path).path
+            if path == "/api/v2/library-files":
+                import v2_local
+                query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                if self.headers.get("Transfer-Encoding"):
+                    raise ValueError("Dosya boyutu belirtilmeli.")
+                previous_timeout = self.connection.gettimeout()
+                self.connection.settimeout(90)
+                try:
+                    result = v2_local.receive_library_file(
+                        sys.modules[__name__], self.rfile,
+                        (query.get("filename") or [""])[0], (query.get("kind") or [""])[0],
+                        int(self.headers.get("Content-Length", "0")),
+                    )
+                finally:
+                    self.connection.settimeout(previous_timeout)
+                self.send_json(result, 201)
+                return
             payload = self.read_json()
             if path.startswith("/api/v2/"):
                 import v2_local

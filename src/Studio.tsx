@@ -44,23 +44,79 @@ export function Setup({status, refresh, onNavigate}: StudioProps) {
 }
 
 export function Library({status,refresh}:StudioProps) {
-  const [name,setName]=useState(''), [mockups,setMockups]=useState<string[]>([]), [video,setVideo]=useState('');
-  const [busy,setBusy]=useState(''),[error,setError]=useState(''),[message,setMessage]=useState('');
-  const [manualPaths,setManualPaths]=useState(''),[manualVideo,setManualVideo]=useState('');
-  const selectionVersion = useRef(0);
-  async function select(kind:'mockups'|'video') {const version=++selectionVersion.current;setBusy(kind);setError('');try{const data=await request<{paths:string[]}>('/api/v2/pick',{kind});if(version===selectionVersion.current&&data.paths.length){if(kind==='mockups')setMockups(data.paths);else setVideo(data.paths[0]);}}catch(e){if(version===selectionVersion.current)setError(e instanceof Error?e.message:String(e));}finally{if(version===selectionVersion.current)setBusy('');}}
-  function applyPaths() {
-    const clean=(value:string)=>value.trim().replace(/^"(.*)"$/, '$1');
-    const paths=manualPaths.split(/\r?\n/).map(clean).filter(Boolean);
-    if(!paths.length||paths.length>19||paths.some(path=>!path.toLowerCase().endsWith('.psd'))){setError('Her satıra bir PSD dosyasının tam yolunu girin. 1–19 dosya ekleyebilirsiniz.');return;}
-    if(new Set(paths.map(path=>path.toLowerCase())).size!==paths.length){setError('Aynı PSD dosyasını bir kez ekleyin.');return;}
-    const selectedVideo=clean(manualVideo);
-    if(selectedVideo&&!/\.(psd|mp4|mov)$/i.test(selectedVideo)){setError('Video dosyası PSD, MP4 veya MOV olmalı.');return;}
-    ++selectionVersion.current;
-    setBusy('');setError('');setMockups(paths);setVideo(selectedVideo);
-    setMessage('Dosya yolları seçime eklendi. Koleksiyon adı girip Koleksiyonu kaydet düğmesine basın.');
+  const [name,setName]=useState('');
+  const [mockups,setMockups]=useState<File[]>([]);
+  const [video,setVideo]=useState<File|null>(null);
+  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+  const [progress,setProgress]=useState('');
+  const mockupInput=useRef<HTMLInputElement>(null),videoInput=useRef<HTMLInputElement>(null);
+  const uploaded=useRef(new Map<File,string>());
+  function selectMockups(files:File[]) {
+    if(!files.length)return;
+    if(files.length>19||files.some(file=>!file.name.toLowerCase().endsWith('.psd')||!file.size||file.size>4*1024**3)) {
+      setError('1–19 PSD dosyası seçin. Her dosya dolu ve en fazla 4 GB olmalı.');return;
+    }
+    setError('');setMessage('');setMockups(files);
   }
-  async function create(e:FormEvent){e.preventDefault();setBusy('save');setError('');setMessage('');try{await request('/api/v2/collections',{name,mockups,video});setMessage(`“${name}” koleksiyonu eklendi. Yeni ürün oluştururken seçebilirsin.`);setName('');setMockups([]);setVideo('');setManualPaths('');setManualVideo('');await refresh();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy('');}}
-  const filename=(path:string)=>path.split(/[\\/]/).pop();
-  return <div className="view-stack"><header className="studio-heading"><div><span className="eyebrow">KENDİ GÖRSEL DÜNYAN</span><h1>Şablon kütüphanesi.</h1><p>Mockuplarını ve videonu bir koleksiyonda topla; her üründe yeniden kullan.</p></div><span className="local-badge"><Layers size={14}/>{status?.collections.filter(c=>c.ready).length||0} hazır koleksiyon</span></header>{error&&<div role="alert" className="inline-message error">{error}</div>}{message&&<div role="status" className="inline-message">{message}</div>}<div className="library-layout"><form className="studio-card library-form" onSubmit={create}><div className="card-title"><div><span className="eyebrow">YENİ KOLEKSİYON</span><h2>Vitrinini sen seç.</h2></div><Plus/></div><label className="field">Koleksiyon adı<input required value={name} onChange={e=>setName(e.target.value)} placeholder="Örn. Minimal yaşam alanları" maxLength={70}/></label><details className="manual-paths"><summary>Dosya yollarıyla ekle</summary><p className="hint">Pencere açılmıyorsa Windows Gezgini’nde PSD dosyalarını seçip sağ tık → Yol olarak kopyala seçeneğini kullan. Her satıra bir dosya yolu yapıştır.</p><label className="field">Mockup PSD yolları<textarea rows={5} value={manualPaths} disabled={busy==='save'} onChange={e=>setManualPaths(e.target.value)} placeholder={'C:\\Mockuplar\\salon.psd\nC:\\Mockuplar\\cerceve.psd'}/></label><label className="field">Video dosyası yolu · isteğe bağlı<input value={manualVideo} disabled={busy==='save'} onChange={e=>setManualVideo(e.target.value)} placeholder="Tam PSD, MP4 veya MOV dosya yolu"/></label><button type="button" className="button" disabled={busy==='save'} onClick={applyPaths}>Dosya yollarını kullan</button></details><button type="button" className="template-picker" disabled={!!busy} onClick={()=>void select('mockups')}><Image size={26}/><b>{busy==='mockups'?'Açılan dosya penceresinden seç…':'Mockup PSD dosyalarını seç'}</b><span>1–19 dosya · Photoshop Smart Object şablonları</span></button>{mockups.length>0&&<div className="chosen-files">{mockups.map((path,i)=><div key={path}><span>{String(i+1).padStart(2,'0')}</span><b>{filename(path)}</b>{i===0&&<small>Kapak</small>}<button type="button" className="text-link" disabled={!!busy} onClick={()=>setMockups(mockups.filter(x=>x!==path))} aria-label={`${filename(path)} kaldır`}><X size={15}/></button></div>)}</div>}<button type="button" className="template-picker video-picker" disabled={!!busy} onClick={()=>void select('video')}><Film size={24}/><b>{video?filename(video):'Video veya video şablonu seç'}</b><span>{busy==='video'?'Açılan dosya penceresinden seç…':'İsteğe bağlı · PSD, MP4 veya MOV'}</span></button>{video&&<button className="text-link" type="button" disabled={!!busy} onClick={()=>setVideo('')}>Videoyu kaldır</button>}<p className="hint">İlk mockup kapak olarak kullanılır. Seçtiğin dosyaların kopyaları bu bilgisayardaki stüdyona alınır. Hazır MP4/MOV, koleksiyondaki her üründe aynı video olarak kullanılır.</p><button className="button primary large" disabled={!!busy||!mockups.length}>{busy==='save'?'Şablonlar kopyalanıyor…':'Koleksiyonu kaydet'}<ChevronRight/></button></form><div className="collection-stack"><div className="section-heading"><h2>Koleksiyonların</h2><button className="icon-button" aria-label="Koleksiyonları yenile" onClick={()=>void refresh()}><RefreshCw size={17}/></button></div>{status?.collections.filter(c=>c.ready).map((c,i)=><article className="collection-card" key={c.name}><div className={`collection-art tone-${i%3}`}><div/><div/><span>{String(i+1).padStart(2,'0')}</span></div><div className="collection-info"><h3>{c.name}</h3><p><Image size={13}/>{c.mockup_count} mockup <Film size={13}/>{c.video_count} video</p><span><CircleCheck size={13}/> Üretime hazır</span></div></article>)}{!status?.collections.some(c=>c.ready)&&<div className="studio-card studio-empty"><div><FolderOpen size={28}/></div><h3>Henüz koleksiyon yok.</h3><p>Soldan kendi PSD dosyalarını ve<br/>videonu seçerek başlayabilirsin.</p></div>}<div className="library-tip"><ShieldCheck/><div><b>Her stüdyo kendine ait.</b><p>Arkadaşların kendi dosyalarını seçer. Mağaza bilgilerin ve ürünlerin dağıtım paketine eklenmez.</p></div></div></div></div></div>;
+  function selectVideo(file:File|undefined) {
+    if(!file)return;
+    if(!/\.(psd|mp4|mov)$/i.test(file.name)||!file.size||file.size>4*1024**3) {
+      setError('PSD, MP4 veya MOV seçin. Dosya dolu ve en fazla 4 GB olmalı.');return;
+    }
+    setError('');setMessage('');setVideo(file);
+  }
+  async function upload(file:File,kind:'mockup'|'video') {
+    const cached=uploaded.current.get(file);
+    if(cached)return cached;
+    const response=await fetch(`/api/v2/library-files?${new URLSearchParams({filename:file.name,kind})}`,{
+      method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file
+    });
+    const data=await response.json();
+    if(!response.ok)throw new Error(data.error||`${file.name} aktarılamadı.`);
+    uploaded.current.set(file,data.path);
+    return data.path as string;
+  }
+  async function create(event:FormEvent) {
+    event.preventDefault();if(busy||!mockups.length)return;
+    setBusy(true);setError('');setMessage('');
+    try {
+      const paths:string[]=[];
+      for(const [index,file] of mockups.entries()) {
+        setProgress(`Mockup ${index+1}/${mockups.length} aktarılıyor: ${file.name}`);
+        paths.push(await upload(file,'mockup'));
+      }
+      let videoPath='';
+      if(video){setProgress(`Video aktarılıyor: ${video.name}`);videoPath=await upload(video,'video');}
+      setProgress('Koleksiyon kaydediliyor…');
+      await request('/api/v2/collections',{name,mockups:paths,video:videoPath});
+      setMessage(`“${name}” koleksiyonu eklendi. Yeni ürün oluştururken seçebilirsin.`);
+      setName('');setMockups([]);setVideo(null);uploaded.current.clear();await refresh();
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+    finally{setBusy(false);setProgress('');}
+  }
+  return <div className="view-stack">
+    <header className="studio-heading"><div><span className="eyebrow">KENDİ GÖRSEL DÜNYAN</span><h1>Şablon kütüphanesi.</h1><p>Mockuplarını ve videonu bir koleksiyonda topla; her üründe yeniden kullan.</p></div><span className="local-badge"><Layers size={14}/>{status?.collections.filter(c=>c.ready).length||0} hazır koleksiyon</span></header>
+    {error&&<div role="alert" className="inline-message error">{error}</div>}
+    {message&&<div role="status" className="inline-message">{message}</div>}
+    <div className="library-layout">
+      <form className="studio-card library-form" onSubmit={create}>
+        <div className="card-title"><div><span className="eyebrow">YENİ KOLEKSİYON</span><h2>Vitrinini sen seç.</h2></div><Plus/></div>
+        <label className="field">Koleksiyon adı<input required disabled={busy} value={name} onChange={e=>setName(e.target.value)} placeholder="Örn. Minimal yaşam alanları" maxLength={70}/></label>
+        <input ref={mockupInput} className="library-file-input" type="file" accept=".psd" multiple disabled={busy} aria-label="Mockup PSD dosyaları" onChange={e=>{selectMockups(Array.from(e.currentTarget.files||[]));e.currentTarget.value='';}}/>
+        <button type="button" className="template-picker" disabled={busy} onClick={()=>mockupInput.current?.click()}><Image size={26}/><b>Mockup PSD dosyalarını seç</b><span>Klasörden 1–19 PSD seç · Birden çok dosya için Ctrl tuşunu kullan</span></button>
+        {mockups.length>0&&<div className="chosen-files">{mockups.map((file,index)=><div key={`${file.name}-${index}`}><span>{String(index+1).padStart(2,'0')}</span><b>{file.name}</b>{index===0&&<small>Kapak</small>}<button type="button" className="text-link" disabled={busy} onClick={()=>setMockups(mockups.filter((_,i)=>i!==index))} aria-label={`${file.name} kaldır`}><X size={15}/></button></div>)}</div>}
+        <input ref={videoInput} className="library-file-input" type="file" accept=".psd,.mp4,.mov" disabled={busy} aria-label="Video veya video şablonu" onChange={e=>{selectVideo(e.currentTarget.files?.[0]);e.currentTarget.value='';}}/>
+        <button type="button" className="template-picker video-picker" disabled={busy} onClick={()=>videoInput.current?.click()}><Film size={24}/><b>{video?video.name:'Video veya video şablonu seç'}</b><span>Klasörden seç · İsteğe bağlı · PSD, MP4 veya MOV</span></button>
+        {video&&<button className="text-link" type="button" disabled={busy} onClick={()=>setVideo(null)}>Videoyu kaldır</button>}
+        <p className="hint">İlk mockup kapak olarak kullanılır. Dosyaların kopyaları bu bilgisayarda saklanır. Hazır MP4/MOV, koleksiyondaki her üründe aynı video olarak kullanılır.</p>
+        {progress&&<p role="status" className="hint">{progress}</p>}
+        <button className="button primary large" disabled={busy||!mockups.length}>{busy?'Koleksiyon hazırlanıyor…':'Koleksiyonu kaydet'}<ChevronRight/></button>
+      </form>
+      <div className="collection-stack"><div className="section-heading"><h2>Koleksiyonların</h2><button className="icon-button" aria-label="Koleksiyonları yenile" onClick={()=>void refresh()}><RefreshCw size={17}/></button></div>
+        {status?.collections.filter(c=>c.ready).map((c,i)=><article className="collection-card" key={c.name}><div className={`collection-art tone-${i%3}`}><div/><div/><span>{String(i+1).padStart(2,'0')}</span></div><div className="collection-info"><h3>{c.name}</h3><p><Image size={13}/>{c.mockup_count} mockup <Film size={13}/>{c.video_count} video</p><span><CircleCheck size={13}/> Üretime hazır</span></div></article>)}
+        {!status?.collections.some(c=>c.ready)&&<div className="studio-card studio-empty"><div><FolderOpen size={28}/></div><h3>Henüz koleksiyon yok.</h3><p>Soldan kendi PSD dosyalarını ve<br/>videonu seçerek başlayabilirsin.</p></div>}
+        <div className="library-tip"><ShieldCheck/><div><b>Her stüdyo kendine ait.</b><p>Arkadaşların kendi dosyalarını seçer. Mağaza bilgilerin ve ürünlerin dağıtım paketine eklenmez.</p></div></div>
+      </div>
+    </div>
+  </div>;
 }

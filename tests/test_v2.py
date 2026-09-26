@@ -80,14 +80,48 @@ class IsolatedStudio(unittest.TestCase):
             with patch.object(v2_local.subprocess,'run',return_value=subprocess.CompletedProcess([],0,json.dumps(expected),'')):
                 self.assertEqual(v2_local.pick('mockups'),{'paths':expected})
 
-    def test_picker_failures_offer_manual_paths(self):
+    def test_picker_failures_are_visible(self):
         for response in [subprocess.CompletedProcess([],1,'','error'),subprocess.CompletedProcess([],0,'',''),subprocess.CompletedProcess([],0,'"C:\\\\test.psd"','')]:
             with patch.object(v2_local.subprocess,'run',return_value=response):
-                with self.assertRaisesRegex(RuntimeError,'Dosya yollarıyla ekle'):
+                with self.assertRaisesRegex(RuntimeError,'tekrar deneyin'):
                     v2_local.pick('mockups')
         with patch.object(v2_local.subprocess,'run',side_effect=subprocess.TimeoutExpired('powershell',90)):
             with self.assertRaisesRegex(RuntimeError,'zaman aşımı'):
                 v2_local.pick('mockups')
+
+    def test_browser_selected_files_create_collection_and_cleanup_staging(self):
+        psd=b'8BPS'+b'x'*(2*1024*1024)
+        template=v2_local.receive_library_file(server,io.BytesIO(psd),'Çerçeve oda.psd','mockup',len(psd))
+        video=v2_local.receive_library_file(server,io.BytesIO(b'video-fixture'),'Video.mp4','video',13)
+        result=v2_local.create_collection(server,{'name':'Browser collection','mockups':[template['path']],'video':video['path']})
+        self.assertEqual(result['mockup_count'],1)
+        self.assertEqual(result['video_count'],1)
+        info=server.selection_template_info(result['name'])
+        self.assertTrue(info['ready'])
+        self.assertEqual(Path(info['static_psds'][0]).read_bytes(),psd)
+        self.assertFalse(Path(template['path']).exists())
+        self.assertFalse(Path(video['path']).exists())
+
+    def test_browser_upload_rejects_invalid_or_partial_files(self):
+        for filename,kind,content,length in [('bad.exe','mockup',b'8BPS',4),('empty.psd','mockup',b'',0),('fake.psd','mockup',b'nope',4),('partial.psd','mockup',b'8BPS',20),('huge.psd','mockup',b'8BPS',5*1024**3)]:
+            with self.subTest(filename=filename),self.assertRaises(ValueError):
+                v2_local.receive_library_file(server,io.BytesIO(content),filename,kind,length)
+        self.assertFalse(list((self.root/'library_uploads').glob('*')))
+
+    def test_browser_http_upload_accepts_binary_and_rejects_foreign_origin(self):
+        http=server.ThreadingHTTPServer(('127.0.0.1',0),server.Handler)
+        self.stack.enter_context(patch.object(server,'APP_PORT',http.server_port))
+        threading.Thread(target=http.serve_forever,daemon=True).start()
+        self.addCleanup(http.server_close);self.addCleanup(http.shutdown)
+        url=f'http://127.0.0.1:{http.server_port}/api/v2/library-files?filename=room.psd&kind=mockup'
+        headers={'Content-Type':'application/octet-stream'}
+        with urllib.request.urlopen(urllib.request.Request(url,data=b'8BPS-test',headers=headers)) as response:
+            self.assertEqual(response.status,201)
+            self.assertEqual(Path(json.load(response)['path']).read_bytes(),b'8BPS-test')
+        for extra,status in [({'Origin':'https://other.example'},403),({'Content-Type':'text/plain'},415)]:
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(urllib.request.Request(url,data=b'8BPS-test',headers=headers|extra))
+            self.assertEqual(error.exception.code,status)
 
     def test_collection_rejects_traversal_and_invalid_psd(self):
         for name in ['../escape','CON','NUL.txt','bad/name','test.']:
